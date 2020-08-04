@@ -22,6 +22,7 @@ import (
 	"github.com/Microsoft/go-winio"
 	"github.com/apenwarr/fixconsole"
 	"github.com/getlantern/systray"
+	"github.com/hashicorp/go-multierror"
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 )
@@ -29,6 +30,7 @@ import (
 var (
 	unixSocket  = flag.String("wsl", "", "Path to Unix socket for passthrough to WSL")
 	namedPipe   = flag.String("winssh", "", "Named pipe for use with Win32 OpenSSH")
+	inetd       = flag.Bool("inetd", false, "Lanuch in inetd mode")
 	verbose     = flag.Bool("verbose", false, "Enable verbose logging")
 	systrayFlag = flag.Bool("systray", false, "Enable systray integration")
 	force       = flag.Bool("force", false, "Force socket usage (unlink existing socket)")
@@ -155,7 +157,7 @@ func queryPageant(buf []byte) (result []byte, err error) {
 
 var failureMessage = [...]byte{0, 0, 0, 1, 5}
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn io.ReadWriteCloser) {
 	defer conn.Close()
 
 	reader := bufio.NewReader(conn)
@@ -222,6 +224,26 @@ func main() {
 	fixconsole.FixConsoleIfNeeded()
 	flag.Parse()
 
+	if *inetd {
+		if *namedPipe != "" || *unixSocket != "" || *systrayFlag {
+			log.Printf("In -inetd mode, none of -wsl, -winssh and -systray are accepted.\n")
+			flag.PrintDefaults()
+			os.Exit(1)
+		}
+
+		inetdMode()
+	}
+
+	if *namedPipe == "" && *unixSocket == "" {
+		log.Printf("At least one of -wsl and -winssh are expected.\n")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
+	serverMode()
+}
+
+func serverMode() {
 	var unix, pipe net.Listener
 	var err error
 
@@ -283,11 +305,6 @@ func main() {
 		}()
 	}
 
-	if *namedPipe == "" && *unixSocket == "" {
-		flag.PrintDefaults()
-		os.Exit(1)
-	}
-
 	if *systrayFlag {
 		go func() {
 			// Wait until we are signalled as finished
@@ -328,4 +345,34 @@ func onSystrayReady() {
 			}
 		}
 	}()
+}
+
+type stdioConn struct {
+	Input  io.ReadCloser
+	Output io.WriteCloser
+}
+
+func (c *stdioConn) Read(p []byte) (int, error) {
+	return c.Input.Read(p)
+}
+
+func (c *stdioConn) Write(p []byte) (int, error) {
+	return c.Output.Write(p)
+}
+
+func (c *stdioConn) Close() (err error) {
+	if e := c.Input.Close(); e != nil {
+		err = multierror.Append(err, e)
+	}
+	if e := c.Output.Close(); e != nil {
+		err = multierror.Append(err, e)
+	}
+	return
+}
+
+func inetdMode() {
+	handleConnection(&stdioConn{
+		Input:  os.Stdin,
+		Output: os.Stdout,
+	})
 }
