@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenSSH-Pageant bridge for WSL
+Documentation=https://github.com/benpye/wsl-ssh-pageant
+
+[Socket]
+ListenStream=%t/wsl-ssh-pageant/ssh-agent.sock
+Accept=yes
+SocketMode=0600
+DirectoryMode=0700
+ExecStartPost=-/bin/systemctl --user set-environment SSH_AUTH_SOCK=%t/wsl-ssh-pageant/ssh-agent.sock
+
+[Install]
+WantedBy=sockets.target

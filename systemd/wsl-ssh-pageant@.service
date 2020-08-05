@@ -1,0 +1,10 @@
+[Unit]
+Description=OpenSSH-Pageant bridge for WSL
+Documentation=https://github.com/benpye/wsl-ssh-pageant
+
+[Service]
+Type=oneshot
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+ExecStart=/usr/local/bin/wsl-ssh-pageant-amd64.exe -inetd
